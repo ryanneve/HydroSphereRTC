@@ -43,7 +43,8 @@
 /*----------( Forward Declarations (?) )----------*/
 //bool recentSample(char time[7], int16_t fresh_time);
 
-typedef struct GyroStruct{
+//typedef struct GyroStruct{
+struct GyroStruct{
   int16_t   gyro_x;
   int16_t   gyro_y;
   int16_t   gyro_z;
@@ -56,39 +57,7 @@ typedef struct GyroStruct{
   float heading;
 };
 
-/*
-typedef struct PTStruct{
-  int16_t DevAddress;  // 7-bit I2C address of the MS5803
-  // Here are the commands that can be sent to the 5803
-  uint8_t D1_256 ;
-  uint8_t D1_512 ;
-  uint8_t D1_1024;
-  uint8_t D1_2048;
-  uint8_t D1_4096;
-  uint8_t D2_256 ;
-  uint8_t D2_512 ;
-  uint8_t D2_1024;
-  uint8_t D2_2048;
-  uint8_t D2_4096;
-  uint8_t AdcRead;
-  uint8_t PromBaseAddress;
-  uint8_t Reset; 
-  long AdcTemperature;// Holds raw ADC data for temperature
-  long AdcPressure;  // Holds raw ADC data for pressure
-  float Temperature;
-  float Pressure;
-  float TempDifference;
-  float Offset;
-  float Sensitivity;
-  // Offsets for second-order temperature computation
-  float T2;
-  float Off2;
-  float Sens2;
-  uint16_t CalConstant[8];  // Matrix for holding calibration constants
-  char  sample_time[7]; // HHmmss\0
-  char  comm_error;
-};
-*/
+
 /*-----( Declare function protoTypes )-----*/
 
 void setupAccelGyro();
@@ -100,10 +69,5 @@ void reportGyro(struct GyroStruct *aMEMS);
 void _initMagnetometer();
 void getMagnetometer(struct GyroStruct *aMEMS);
 void reportMagnetometer(struct GyroStruct *aMEMS);
-
-void setupPT();
-int32_t getTemperature();
-int32_t getPressure();
-void debugTemperature();
 
 #endif

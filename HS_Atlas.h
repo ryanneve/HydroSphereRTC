@@ -17,47 +17,48 @@
 
 /*----------( Forward Declarations (?) )----------*/
 bool recentSample(char time[7], int16_t fresh_time);
-
 /*----------( Structures )----------*/
 //typedef struct DO_Struct {
 struct DO_Struct {
-  bool    return_sat;
-  float   _dox;
-  uint16_t _sat; 
-  char    dox[10]; // Ends in \0
-  char    sample_time[7]; // HHmmss\0
-  char    saturation[10]; // Ends in \0MEMS
-  char    comm_error;
+	char _version;
+	bool    return_sat;
+	float   _dox;
+	char    dox[10]; // Ends in \0
+	float   _sat;
+	char    saturation[10]; // Ends in \0
+	char    sample_time[7]; // HHmmss\0
+	char    comm_error;
 };
 
 //typedef struct CondStruct {
 struct CondStruct {
-  float   _ec;
-  float   _tds;
-  float   _sal;
-  float   _sg;
-  char    tds[10];
-  char    ec[10]; // Ends in \0
-  char    sal[10]; // Ends in \0
-  char    sg[10]; // Ends in \0
-  char    sample_time[7]; // HHmmss\0
-  char    comm_error;
+	float   _ec;
+	float   _tds;
+	float   _sal;
+	float   _sg;
+	char    tds[10];
+	char    ec[10]; // Ends in \0
+	char    sal[10]; // Ends in \0
+	char    sg[10]; // Ends in \0
+	char    sample_time[7]; // HHmmss\0
+	char    comm_error;
 };
 
 /*----------( Function Prototypes )----------*/
 //logger Logger_SD;
 void initDO();
-uint8_t _getDO(struct DO_Struct *aDO);
-uint8_t getCompDO(struct DO_Struct *aDO,struct CondStruct *aCond,float temp_C);
-uint8_t getBasicDO(struct DO_Struct *aDO);
+void setDO_version(struct DO_Struct *aDO,char ver);// Either '5', '6', or 'E' for EZO
+bool _getDO(struct DO_Struct *aDO);
+bool getCompDO(struct DO_Struct *aDO,struct CondStruct *aCond,float temp_C);
+bool getBasicDO(struct DO_Struct *aDO);
 void toggleDOSat();
 void quietDO();
 void setDOContinuous();
 
 void initCond(struct CondStruct *aCond);
-uint8_t _getCond(struct CondStruct *aCond);
+bool _getCond(struct CondStruct *aCond);
 void   setCondTemp(float temp_C);
-uint8_t getCond(struct CondStruct *aCond);
+bool getCond(struct CondStruct *aCond);
 void quietCond();
 void setCondContinuous();
 

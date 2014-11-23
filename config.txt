@@ -1,13 +1,19 @@
+// Set scheduile rates.
+// A scheduled rate of 0 will disable that schedule
 SCHED_RATE1=10
-SCHED_RATE2=20
-SCHED_RATE3=30
+SCHED_RATE2=10
+SCHED_RATE3=0
+// Set trigger date and time.
 TRIG_DAY=26
 TRIG_HOUR=13
 TRIG_MINUTE=10
+// Set solenoid open duration in ms
 SOL_DURATION=6000
+// Set deployment delay before logging begins.
 DEPLOY_DELAY=90
+// Sensor configuration setup.
 HAS_PT_SENSOR=1
-EXT_MS5803_MAX_BAR=1
-EXT_MS5803_ADDR=0x76
-MPU_VERSION=9050
-DO_VERSION=6
+EXT_MS5803_MAX_BAR=1 // 1,5,14,..
+EXT_MS5803_ADDR=0x76 // 0x76 or 0x77
+MPU_VERSION=9050 // 0,6050 or 9050
+DO_VERSION=6 // 5,6, or E

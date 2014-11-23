@@ -29,10 +29,7 @@ bool _getDO(struct DO_Struct *aDO){
 	/* Prompts for a value. Might be faster to put in continuous mode and just parse.
 	*/
 	delay(1000);
-	aDO->return_sat = 0;
-	//Serial.print("Data from DO sensor: ");
-	
-	
+	aDO->return_sat = 0;	
 	uint32_t timeout_ms = millis() + 1000;
 	while (!SerialDO.available()) { // wait for data up to timeout_ms
 		delay(10);
@@ -108,14 +105,6 @@ bool _getCond(struct CondStruct *aCond){
 		delay(10);
 		if ( millis() > timeout_ms ) break;
 	}
-	/*
-	Serial.println("COND R response:");
-	while ( SerialCond.available() ) {
-	charRead = SerialCond.read();
-	Serial.write(charRead);
-	if ( charRead == 13 ) Serial.write(10);
-	}
-	Serial.println("]"); */
 	aCond->_ec = SerialCond.parseFloat();
 	aCond->_tds = SerialCond.parseFloat();
 	aCond->_sal = SerialCond.parseFloat();

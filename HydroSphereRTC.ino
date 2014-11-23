@@ -25,7 +25,7 @@ Desired schedule:
 // For 8x1.5v (12v) alkaline use 9.2v
 // For 2x4x1.5v (6v) alkaline use 4.6v
 #define TRIGGER_VOLTAGE  4.6
-#define MIN_TRIGGER_VOLTAGE 4.4 // Don't trigger below this. This prevents triggering when on 5v USB
+bool ON_BATTERY = false;
 uint8_t SCHED_RATE1 = 15; // Must be lowest
 uint8_t SCHED_RATE2 = 30; // Must be multiple of SCHED_RATE1
 uint8_t SCHED_RATE3 = 60;// Must be multiple of SCHED_RATE1
@@ -34,15 +34,15 @@ uint8_t EXT_MS5803_ADDR = 0x76;  // i2c address
 uint8_t INT_MS5803_MAX_BAR = 5;  //
 uint8_t INT_MS5803_ADDR = 0x77;  // i2c address
 
-// Trigger date/time. This should come from EEPROM eventually
-uint8_t TRIG_DAY = 11;
-uint8_t TRIG_HOUR = 16;
-uint8_t TRIG_MINUTE = 30;
-uint16_t SOL_DURATION = 1000; // One second
+// Trigger date/time. These come from config.txt
+uint8_t TRIG_DAY = 1;
+uint8_t TRIG_HOUR = 12;
+uint8_t TRIG_MINUTE = 00;
+uint16_t SOL_DURATION = 5000; // Five seconds
 uint16_t DEPLOY_DELAY = 0;  // Delay before logging/triggering in minutes
 bool HAS_PT_SENSOR = 1;
 uint16_t MPU_VERSION = 6050;  // Either 0, 6050 or 9050
-char DO_VERSION = '5'; // '5','6' or 'E'
+char DO_VERSION = '5'; // Atlas Scientific DO chip version. '5','6' or 'E'
 
 //----------------------NOTHING TO CONFIGURE BELOW HERE----------------------------------------
 
@@ -68,21 +68,20 @@ DateTime t; // Structure to hold a DateTime
 /*----------( Define Global Variables)----------*/
 char g_battery_voltage[7] = "??????";
 const float VOLTAGE_MULTIPLIER = 2.0; // multiply by this to get true voltage.
-bool on_batt = false; // Keep track if we've been on battery for solenoid trigger.
-bool do_sched1,do_sched2,do_sched3 = true;
+bool do_sched1,do_sched2,do_sched3 = false;
 const uint8_t g_LOG_SIZE = 160;
 uint32_t g_Sched1, g_Sched2, g_Sched3, g_SchedNext,g_now,g_delay_start;
 uint32_t g_millisDelta = millis();
 bool g_sol_triggered = false;
-const bool LOG_DEBUG = false;
+const bool LOG_DEBUG = true; // Send DEBUG messages to log file?
 const char LOG_FILE[] = "HS_LOG.CSV";
 const char SCHED1_FILE[] = "SCHED1.CSV";
 const char SCHED2_FILE[] = "SCHED2.CSV";
 const char SCHED3_FILE[] = "SCHED3.CSV";
 const char CONFIG_FILE[] = "config.txt";
 const char SCHED1_HEADER[] = "Sample Time,GyX,GyY,GyZ,AccX,AccY,AccZ,MagX,MagY,MagZ,Head,VBatt\r\n";
-const char SCHED2_HEADER[] = "Sample Time,ExtTemp,D1temp,Press_mBar,D2press,red,grn,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond\r\n";
-const char SCHED3_HEADER[] = "Sample Time,DO%,DO_mgl,EC,TDS,Sal,SG\r\n";
+const char SCHED2_HEADER[] = "Sample Time,ExtTemp,D1temp,Press_mBar,D2press,red,grn,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DO%,DO_mgl,EC,TDS,Sal,SG\r\n";
+const char SCHED3_HEADER[] = "Sample Time,\r\n";
 
 void setup() {
 	Serial.begin(9600);
@@ -148,14 +147,15 @@ void setup() {
 }
 
 void loop() {
+	
 	/**/
 	t = RTClock.now();
 	g_now = t.unixtime();
 	Serial.print(g_now ); Serial.print(" <-> "); Serial.println(g_SchedNext);
 	if ( !g_sol_triggered ) checkSolenoid(); // triggered only once;
-	if ( g_now >= g_Sched1 ) do_sched1 = true;
-	if ( g_now >= g_Sched2 ) do_sched2 = true;
-	if ( g_now >= g_Sched3 ) do_sched3 = true;
+	if ( g_now >= g_Sched1 && SCHED_RATE1 > 0 ) do_sched1 = true;
+	if ( g_now >= g_Sched2 && SCHED_RATE2 > 0 ) do_sched2 = true;
+	if ( g_now >= g_Sched3 && SCHED_RATE3 > 0 ) do_sched3 = true;
 	// Now see if we need to run a schedule
 	if ( do_sched1 || do_sched2 || do_sched3 ) {
 		// Set time for next occurance.
@@ -212,12 +212,13 @@ void sched1() {
 			dtostrf(sensor_GYRO.heading,5,1,head); head[7] = '\0';
 		}
 	}
-	char log_output[200]; uint8_t log_idx = 0;
+	uint16_t log_line_max = 200;
 	uint8_t buf_len = 20;
+	char log_output[log_line_max]; uint8_t log_idx = 0;
 	char buf[buf_len];
 	t = RTClock.now();
 	log_idx +=sprintf(log_output + log_idx,"%s,",t.toYMDString(buf,buf_len));
-	if (MPU_VERSION != 0) {
+	if (MPU_VERSION != 0) {// Both 6050 and 9050 have these.
 		log_idx +=sprintf(log_output + log_idx,"%d,",sensor_GYRO.gyro_x);
 		log_idx +=sprintf(log_output + log_idx,"%d,",sensor_GYRO.gyro_y);
 		log_idx +=sprintf(log_output + log_idx,"%d,",sensor_GYRO.gyro_z);
@@ -225,7 +226,7 @@ void sched1() {
 		log_idx +=sprintf(log_output + log_idx,"%d,",sensor_GYRO.accel_y);
 		log_idx +=sprintf(log_output + log_idx,"%d,",sensor_GYRO.accel_z);
 	}
-	else {
+	else { // Blanks
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // gyro x is zero
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // gyro y is zero
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // gyro z is zero
@@ -239,7 +240,7 @@ void sched1() {
 		log_idx +=sprintf(log_output + log_idx,"%d,",sensor_GYRO.magnetom_z);
 		log_idx +=sprintf(log_output + log_idx,"%s,",head);
 	}
-	else {
+	else { // More blanks
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // magnetom_x is zero
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // magnetom_y is zero
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // magnetom_z is zero
@@ -247,29 +248,42 @@ void sched1() {
 	}
 	log_idx +=sprintf(log_output + log_idx,"%s" ,g_battery_voltage);
 	Logger_SD::Instance()->msgL(DEBUG,"sched1 Logging %s of size %d",log_output,log_idx);
+	if ( log_idx >= log_line_max ) Logger_SD::Instance()->msgL(ERROR,F("sched2 log line exceeds maximum of %d"),log_line_max);
 	Logger_SD::Instance()->saveSample(log_output,log_idx);
 }
 
 void sched2() {
-	/* Log ExtTemp,D1temp,Press_mBar,D2press,red,grn,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond
+	/* Log xtTemp,D1temp,Press_mBar,D2press,red,grn,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DO%,DO_mgl,EC,TDS,Sal,SG
 	*/
 	t = RTClock.now();// Update for logger
 	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched2 entered"));
 	if ( not sensor_RGB.getContinuous() ) sensor_RGB.getRGB(); // Get some new values
-	if ( HAS_PT_SENSOR ) {
+	// Now DO and Conductivity sensors
+	float ext_temperature;
+	if ( HAS_PT_SENSOR) {
 		presstemp.getPressure(true);
-		presstemp.getTemperature(true);
+		ext_temperature = presstemp.getTemperature()/100; // returns float
+		Serial.print("Digital temperature is "); Serial.println(ext_temperature);
 	}
+	else {
+		ext_temperature = get_analog_temperature(TEMPERATURE_PIN);
+		Serial.print("Analog temperature is "); Serial.println(ext_temperature);
+	}
+	//setCondTemp(ext_temperature); // Causing problems
+	getCond(&sensor_COND);// conductivity.
+	getCompDO(&sensor_DO,&sensor_COND,ext_temperature);
+	
 	// Log readings
 	Logger_SD::Instance()->setSampleFile(SCHED2_FILE);
-	char log_output[200]; uint8_t log_idx = 0;
+	uint16_t log_line_max = 200;
 	uint8_t buf_len = 20;
+	char log_output[log_line_max]; uint8_t log_idx = 0;
 	char buf[buf_len];
 	t = RTClock.now();// Update for logger
 	log_idx +=sprintf(log_output + log_idx,"%s,",t.toYMDString(buf,buf_len));
+	dtostrf(ext_temperature,6,3,buf);
+	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 	if ( HAS_PT_SENSOR ) {
-		dtostrf(presstemp.temp_C,6,3,buf);
-		log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 		itoa(presstemp.getD1Pressure(),buf,10);
 		log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 		dtostrf(presstemp.press_mBar,6,3,buf);
@@ -278,8 +292,6 @@ void sched2() {
 		log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 	}
 	else {
-		dtostrf(get_analog_temperature(TEMPERATURE_PIN),6,3,buf);
-		log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // D1temp is zero
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // pressure is zero
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // D2press is zero
@@ -291,34 +303,8 @@ void sched2() {
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getLxGreen());
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getLxBlue());
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getLxTotal());
-	log_idx +=sprintf(log_output + log_idx,"%d",sensor_RGB.getLxBeyond());
-	Logger_SD::Instance()->msgL(DEBUG,F("sched2 Logging %s of size %d"),log_output,log_idx);
-	Logger_SD::Instance()->saveSample(log_output,log_idx);
-}
-
-void sched3() {
-	/* Log DO%, DO_mgl, EC, TDS, Sal, SG
-	*/
-	t = RTClock.now();
-	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched3 entered"));
-	float ext_temperature;
-	if ( HAS_PT_SENSOR) {
-		ext_temperature = presstemp.getTemperature()/100; // returns float
-		Serial.print("Digital temperature is "); Serial.println(ext_temperature);
-	}
-	else {
-		ext_temperature = get_analog_temperature(TEMPERATURE_PIN);
-		Serial.print("Analog temperature is "); Serial.println(ext_temperature);
-	}
-	//setCondTemp(ext_temperature); // Causing problems
-	getCond(&sensor_COND);// conductivity.
-	getCompDO(&sensor_DO,&sensor_COND,ext_temperature);
-	Logger_SD::Instance()->setSampleFile(SCHED3_FILE);
-	char log_output[200]; uint8_t log_idx = 0;
-	uint8_t buf_len = 20;
-	char buf[buf_len];
-	t = RTClock.now();
-	log_idx +=sprintf(log_output + log_idx,"%s,",t.toYMDString(buf,buf_len));
+	log_idx +=sprintf(log_output + log_idx,"%d" ,sensor_RGB.getLxBeyond());
+	
 	dtostrf(sensor_DO._sat,6,2,buf);
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 	dtostrf(sensor_DO._dox,6,2,buf);
@@ -331,7 +317,24 @@ void sched3() {
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 	dtostrf(sensor_COND._sg,7,2,buf);
 	log_idx +=sprintf(log_output + log_idx,"%s",buf);
+	Logger_SD::Instance()->msgL(DEBUG,F("sched2 Logging %s of size %d"),log_output,log_idx);
+	if ( log_idx >= log_line_max ) Logger_SD::Instance()->msgL(ERROR,F("sched2 log line exceeds maximum of %d"),log_line_max);
+	Logger_SD::Instance()->saveSample(log_output,log_idx);
+}
+
+void sched3() {
+	/* Log 
+	*/
+	Logger_SD::Instance()->setSampleFile(SCHED3_FILE);
+	uint16_t log_line_max = 200;
+	uint8_t buf_len = 20;
+	char log_output[log_line_max]; uint8_t log_idx = 0;
+	char buf[buf_len];
+	t = RTClock.now();
+	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched3 entered"));
+	log_idx +=sprintf(log_output + log_idx,"%s,",t.toYMDString(buf,buf_len));
 	Logger_SD::Instance()->msgL(DEBUG,F("sched3 Logging %s of size %u"),log_output,log_idx);
+	if ( log_idx >= log_line_max ) Logger_SD::Instance()->msgL(ERROR,F("sched2 log line exceeds maximum of %d"),log_line_max);
 	Logger_SD::Instance()->saveSample(log_output,log_idx);
 	//float press_mBar = presstemp.press_mBar;
 	//float density_kgm3 = getDensity(presstemp.temp_C,atof(sensor_COND.sal));
@@ -345,13 +348,15 @@ bool checkSolenoid(){
 	bool trigger = false;
 	int16_t volt_pin_val = analogRead(BATT_VOLTAGE_PIN);
 	float battery_voltage = ((float)volt_pin_val/1024) * 5.00 * VOLTAGE_MULTIPLIER;
-	if ( battery_voltage > 5.0 ) on_batt = true;
+	if ( battery_voltage > 5.0  && ON_BATTERY == false ) {
+		ON_BATTERY = true; //ON_BATTERY
+		Logger_SD::Instance()->msgL(INFO,F("Battery detected, enabling solenoid"));
+	}
 	dtostrf(battery_voltage,5,3,g_battery_voltage); g_battery_voltage[6] = 0;
 	char batt_min[7]; dtostrf(TRIGGER_VOLTAGE,5,3,batt_min); batt_min[6] = 0;
-	if (battery_voltage < MIN_TRIGGER_VOLTAGE ) Logger_SD::Instance()->msgL(DEBUG,F("Battery voltage %s. on USB power"),g_battery_voltage);
-	else Logger_SD::Instance()->msgL(DEBUG,F("Battery voltage %s. Min is %s (%d)."),g_battery_voltage,batt_min,volt_pin_val);
-	if ( g_sol_triggered == false ) { //&& on_batt == true ) { // only once and must have seen a battery
-		if ( battery_voltage <= TRIGGER_VOLTAGE && battery_voltage > MIN_TRIGGER_VOLTAGE) {
+	Logger_SD::Instance()->msgL(DEBUG,F("Battery voltage %s. Min is %s (%d)."),g_battery_voltage,batt_min,volt_pin_val);
+	if ( g_sol_triggered == false && ON_BATTERY) { // only once and must have seen a battery
+		if ( battery_voltage <= TRIGGER_VOLTAGE ) {
 			Logger_SD::Instance()->msgL(CRITICAL,F("Low voltage %s <= %s triggering Solenoid"),g_battery_voltage,batt_min);
 			trigger = true;
 		}

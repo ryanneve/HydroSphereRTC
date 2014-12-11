@@ -15,7 +15,7 @@ Desired schedule:
 #include <AK8975.h>      // For HS_OpenROV magnetometer
 #include <MPU6050.h>     // For HS_OpenROV accel and gyro
 #include <MS5803_I2C.h>  // fot HS_OpenRov pressure and temperature
-#include <DS3234.h>      // SPI RTC Clock
+//#include <DS3234.h>      // SPI RTC Clock
 #include <Atlas_RGB.h>   // RGB sensor
 #include "HS_Atlas.h"    // DO & COND
 #include "HS_OpenROV.h"  // Pressure & accelerometer
@@ -43,7 +43,7 @@ uint16_t DEPLOY_DELAY = 0;  // Delay before logging/triggering in minutes
 bool HAS_PT_SENSOR = 1;
 uint16_t MPU_VERSION = 6050;  // Either 0, 6050 or 9050
 char DO_VERSION = '5'; // Atlas Scientific DO chip version. '5','6' or 'E'
-
+float EC_K = 0; // Either 0.1, 1.0 or 10.0
 //----------------------NOTHING TO CONFIGURE BELOW HERE----------------------------------------
 
 
@@ -63,18 +63,23 @@ struct CondStruct  sensor_COND;
 struct GyroStruct  sensor_GYRO;
 AtlasRGB sensor_RGB(&SERIAL_RGB);
 MS5803 presstemp(EXT_MS5803_ADDR);
-DateTime t; // Structure to hold a DateTime
+DateTime g_time; // Structure to hold a DateTime. USed for Messaging
+DateTime g_sched_time; // Next scheduled action
 
 /*----------( Define Global Variables)----------*/
 char g_battery_voltage[7] = "??????";
 const float VOLTAGE_MULTIPLIER = 2.0; // multiply by this to get true voltage.
-bool do_sched1,do_sched2,do_sched3 = false;
+bool do_sched1 = false,do_sched2 = false,do_sched3 = false;
 const uint8_t g_LOG_SIZE = 160;
-uint32_t g_Sched1, g_Sched2, g_Sched3, g_SchedNext,g_now,g_delay_start;
-uint32_t g_millisDelta = millis();
+uint32_t g_Sched1;
+uint32_t g_Sched2;
+uint32_t g_Sched3;
+uint32_t g_SchedNext;
+uint32_t g_now_unixtime;
+uint32_t g_delay_start;
 bool g_sol_triggered = false;
 const bool LOG_DEBUG = true; // Send DEBUG messages to log file?
-const char LOG_FILE[] = "HS_LOG.CSV";
+const char LOG_FILE[]    = "HS_LOG.CSV";
 const char SCHED1_FILE[] = "SCHED1.CSV";
 const char SCHED2_FILE[] = "SCHED2.CSV";
 const char SCHED3_FILE[] = "SCHED3.CSV";
@@ -84,7 +89,7 @@ const char SCHED2_HEADER[] = "Sample Time,ExtTemp,D1temp,Press_mBar,D2press,red,
 const char SCHED3_HEADER[] = "Sample Time,\r\n";
 
 void setup() {
-	Serial.begin(9600);
+	Serial.begin(115200);
 	for (uint8_t i = 0; i < 80 ; i++) Serial.print('-');
 	Serial.println();
 	pinMode(SOLENOID_PIN,OUTPUT);
@@ -105,15 +110,17 @@ void setup() {
 	Logger_SD::Instance()->initializeConfig(CONFIG_FILE);
 	if ( has_SD ) loadConfigValues(); // Loads values from SD
 	initRTC();
-	t = RTClock.now();
-	g_delay_start = t.unixtime() + (DEPLOY_DELAY * 60);
-	g_Sched1 = t.unixtime();
-	g_Sched2 = t.unixtime();
-	g_Sched3 = t.unixtime();
-	g_SchedNext = g_Sched1;
+	g_time = RTClock.now();
+	g_sched_time = RTClock.now();
+	g_now_unixtime = g_time.unixtime();
+	g_delay_start  = g_now_unixtime + (DEPLOY_DELAY * 60);
+	g_Sched1       = 0;
+	g_Sched2       = 0;
+	g_Sched3       = 0;
+	g_SchedNext    = g_now_unixtime;
 	RTClock.setA2Time(TRIG_DAY, TRIG_HOUR, TRIG_MINUTE,0, 0, 0, 0); // Set Solenoid Alarm
 	RTClock.turnOnAlarm(2);
-	Logger_SD::Instance()->setLogDT(&t);
+	Logger_SD::Instance()->setLogDT(&g_time); // We will use this global as the current time for logging.
 	initDO();
 	setDO_version(&sensor_DO,DO_VERSION);
 	initCond(&sensor_COND);
@@ -137,50 +144,59 @@ void setup() {
 	Logger_SD::Instance()->msgL(INFO,F("Trigger date set to day %d at %d:%02d"),TRIG_DAY,TRIG_HOUR,TRIG_MINUTE);
 	Logger_SD::Instance()->msgL(INFO,F("Trigger duration set to %d ms"),SOL_DURATION);
 	// First check if is's time to do schedule
-	t = RTClock.now();
-	if ( g_delay_start > t.unixtime() ) {
+	g_time = RTClock.now();
+	if ( g_delay_start > g_time.unixtime() ) {
 		Logger_SD::Instance()->msgL(INFO,F("Delaying instrument start %d minutes"), DEPLOY_DELAY);
 		Serial.flush();
 		delay(100);
-		lowPowerDelay((uint16_t)(g_delay_start - t.unixtime()));
+		lowPowerDelay((uint16_t)(g_delay_start - g_time.unixtime()));
 	}
 }
 
 void loop() {
-	
 	/**/
-	t = RTClock.now();
-	g_now = t.unixtime();
-	Serial.print(g_now ); Serial.print(" <-> "); Serial.println(g_SchedNext);
+	g_time = RTClock.now();
+	g_now_unixtime = g_time.unixtime(); // This is the time of the beginning of the loop. Not updated until next loop.
+	Serial.print(g_now_unixtime); Serial.print(" >--> "); Serial.println(g_sched_time.unixtime());
+	Serial.print('('); Serial.print(g_Sched1);
+	Serial.print(','); Serial.print(g_Sched2);
+	Serial.print(','); Serial.print(g_Sched3);
+	Serial.println(')');
 	if ( !g_sol_triggered ) checkSolenoid(); // triggered only once;
-	if ( g_now >= g_Sched1 && SCHED_RATE1 > 0 ) do_sched1 = true;
-	if ( g_now >= g_Sched2 && SCHED_RATE2 > 0 ) do_sched2 = true;
-	if ( g_now >= g_Sched3 && SCHED_RATE3 > 0 ) do_sched3 = true;
+	if ( g_now_unixtime >= g_Sched1 && SCHED_RATE1 > 0 ) do_sched1 = true;
+	if ( g_now_unixtime >= g_Sched2 && SCHED_RATE2 > 0 ) do_sched2 = true;
+	if ( g_now_unixtime >= g_Sched3 && SCHED_RATE3 > 0 ) do_sched3 = true;
 	// Now see if we need to run a schedule
 	if ( do_sched1 || do_sched2 || do_sched3 ) {
-		// Set time for next occurance.
-		if ( do_sched1 ) g_Sched1 = t.unixtime() + SCHED_RATE1;
-		if ( do_sched2 ) g_Sched2 = t.unixtime() + SCHED_RATE2;
-		if ( do_sched3 ) g_Sched3 = t.unixtime() + SCHED_RATE3;
+		// Set time for next schedule, then do it.
 		if ( do_sched1 ) {
-			do_sched1 = false;
+			g_Sched1 = g_now_unixtime + SCHED_RATE1;
 			sched1();
+			do_sched1 = false;
 		}
 		if ( do_sched2 ) {
-			do_sched2 = false;
+			g_Sched2 = g_now_unixtime + SCHED_RATE2;
 			sched2();
+			do_sched2 = false;
 		}
 		if ( do_sched3 ) {
-			do_sched3 = false;
+			g_Sched3 = g_now_unixtime + SCHED_RATE3;
 			sched3();
+			do_sched3 = false;
 		}
-		t = RTClock.now();
+		g_time = RTClock.now();
 		Logger_SD::Instance()->msgL(DEBUG,F("Done with schedules."));
+		// Get the next occurence
 		g_SchedNext = min(g_Sched1,min(g_Sched2,g_Sched3));
-		int32_t lp_delay = (int32_t)g_SchedNext - (int32_t)t.unixtime() - 1; // Sleep for one sec less than we need to
+		int32_t lp_delay = (int32_t)g_SchedNext - (int32_t)g_time.unixtime() - 1; // Sleep for one sec less than we need to
 		if ( lp_delay > 0 ) {
-			DateTime wake (g_SchedNext); uint8_t buf_len = 20 ; char buf[buf_len];
-			Logger_SD::Instance()->msgL(DEBUG,F("Sleeping %d seconds until %s."),lp_delay,wake.toString(buf,buf_len));
+			uint8_t buf_len = 30;
+			char buf[buf_len];
+			g_sched_time.setFromUNIX(g_SchedNext);
+			g_sched_time.toString(buf,buf_len);
+			Serial.println(lp_delay);
+			Serial.println(buf);
+			Logger_SD::Instance()->msgL(DEBUG,F("Next action in %d seconds at %s."),lp_delay,buf);
 			Serial.flush();
 			delay(100);
 			lowPowerDelay((uint16_t)lp_delay);
@@ -193,7 +209,7 @@ void loop() {
 void sched1() {
 	/* Log GyX,GyY,GyZ,AccX,AccY,AccZ,MagX,MagY,MagZ,Head,VBatt
 	*/
-	t = RTClock.now(); // Update for logger
+	g_time = RTClock.now(); // Update for logger
 	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched1 entered"));
 	char head[10];
 	if (MPU_VERSION != 0)
@@ -216,8 +232,8 @@ void sched1() {
 	uint8_t buf_len = 20;
 	char log_output[log_line_max]; uint8_t log_idx = 0;
 	char buf[buf_len];
-	t = RTClock.now();
-	log_idx +=sprintf(log_output + log_idx,"%s,",t.toYMDString(buf,buf_len));
+	g_time = RTClock.now();
+	log_idx +=sprintf(log_output + log_idx,"%s,",g_time.toYMDString(buf,buf_len));
 	if (MPU_VERSION != 0) {// Both 6050 and 9050 have these.
 		log_idx +=sprintf(log_output + log_idx,"%d,",sensor_GYRO.gyro_x);
 		log_idx +=sprintf(log_output + log_idx,"%d,",sensor_GYRO.gyro_y);
@@ -248,14 +264,18 @@ void sched1() {
 	}
 	log_idx +=sprintf(log_output + log_idx,"%s" ,g_battery_voltage);
 	Logger_SD::Instance()->msgL(DEBUG,"sched1 Logging %s of size %d",log_output,log_idx);
-	if ( log_idx >= log_line_max ) Logger_SD::Instance()->msgL(ERROR,F("sched2 log line exceeds maximum of %d"),log_line_max);
+	if ( log_idx >= log_line_max ){
+		Logger_SD::Instance()->msgL(ERROR,F("sched2 log line exceeds maximum of %d"),log_line_max);
+		log_idx = log_line_max;
+		log_output[log_idx - 1] = 0;
+	}
 	Logger_SD::Instance()->saveSample(log_output,log_idx);
 }
 
 void sched2() {
 	/* Log xtTemp,D1temp,Press_mBar,D2press,red,grn,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DO%,DO_mgl,EC,TDS,Sal,SG
 	*/
-	t = RTClock.now();// Update for logger
+	g_time = RTClock.now();// Update for logger
 	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched2 entered"));
 	if ( not sensor_RGB.getContinuous() ) sensor_RGB.getRGB(); // Get some new values
 	// Now DO and Conductivity sensors
@@ -279,8 +299,8 @@ void sched2() {
 	uint8_t buf_len = 20;
 	char log_output[log_line_max]; uint8_t log_idx = 0;
 	char buf[buf_len];
-	t = RTClock.now();// Update for logger
-	log_idx +=sprintf(log_output + log_idx,"%s,",t.toYMDString(buf,buf_len));
+	g_time = RTClock.now();// Update for logger
+	log_idx +=sprintf(log_output + log_idx,"%s,",g_time.toYMDString(buf,buf_len));
 	dtostrf(ext_temperature,6,3,buf);
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 	if ( HAS_PT_SENSOR ) {
@@ -330,9 +350,9 @@ void sched3() {
 	uint8_t buf_len = 20;
 	char log_output[log_line_max]; uint8_t log_idx = 0;
 	char buf[buf_len];
-	t = RTClock.now();
+	g_time = RTClock.now();
 	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched3 entered"));
-	log_idx +=sprintf(log_output + log_idx,"%s,",t.toYMDString(buf,buf_len));
+	log_idx +=sprintf(log_output + log_idx,"%s,",g_time.toYMDString(buf,buf_len));
 	Logger_SD::Instance()->msgL(DEBUG,F("sched3 Logging %s of size %u"),log_output,log_idx);
 	if ( log_idx >= log_line_max ) Logger_SD::Instance()->msgL(ERROR,F("sched2 log line exceeds maximum of %d"),log_line_max);
 	Logger_SD::Instance()->saveSample(log_output,log_idx);
@@ -361,22 +381,22 @@ bool checkSolenoid(){
 			trigger = true;
 		}
 		// Now check time.
-		t = RTClock.now();
-		if ( TRIG_DAY == t.day() ) { // Date matches
+		g_time = RTClock.now();
+		if ( TRIG_DAY == g_time.day() ) { // Date matches
 			Serial.println("DAY matches");
-			Logger_SD::Instance()->msgL(DEBUG,F("Looking for %d:%d >= %d:%d"),t.hour(),t.minute(), TRIG_HOUR,TRIG_MINUTE);
-			if ( (TRIG_HOUR < t.hour()) || ( TRIG_HOUR == t.hour() && TRIG_MINUTE <= t.minute() )) { // Hour matches or has passed. Minute is now or has passed.
+			Logger_SD::Instance()->msgL(DEBUG,F("Looking for %d:%d >= %d:%d"),g_time.hour(),g_time.minute(), TRIG_HOUR,TRIG_MINUTE);
+			if ( (TRIG_HOUR < g_time.hour()) || ( TRIG_HOUR == g_time.hour() && TRIG_MINUTE <= g_time.minute() )) { // Hour matches or has passed. Minute is now or has passed.
 				uint8_t time_str_len = 20;
 				char time_str[time_str_len];
-				t = RTClock.now();
-				Logger_SD::Instance()->msgL(WARN,F("Current time %s >= trigger time %d-%d:%d"),t.toYMDString(time_str,time_str_len),TRIG_DAY,TRIG_HOUR,TRIG_MINUTE);
+				g_time = RTClock.now();
+				Logger_SD::Instance()->msgL(WARN,F("Current time %s >= trigger time %d-%d:%d"),g_time.toYMDString(time_str,time_str_len),TRIG_DAY,TRIG_HOUR,TRIG_MINUTE);
 				trigger = true;
 			}
 			Serial.println("Didn't find it");
 		}
 		// Check RTC
 		if ( RTClock.checkIfAlarm(2) ) {
-			t = RTClock.now();
+			g_time = RTClock.now();
 			Logger_SD::Instance()->msgL(WARN,F("RTC Alarm 2 indicated"));
 			trigger = true;
 		}
@@ -385,9 +405,9 @@ bool checkSolenoid(){
 	return trigger;
 }
 
-void trigSolenoid(int16_t open_millis) {
+void trigSolenoid(uint16_t open_millis) {
 	/* Trigger solenoid for open_millis ms */
-	unsigned long close_time = millis() + open_millis;
+	uint32_t close_time = millis() + open_millis;
 	Logger_SD::Instance()->msgL(WARN,F("Opening ballast solenoid")); // at %02d:%02d:%02d",Rtc.getHours24(),Rtc.getMinutes(),Rtc.getSeconds());
 	digitalWrite(SOLENOID_PIN,HIGH);
 	g_sol_triggered = true; // So we only do this once.
@@ -403,51 +423,40 @@ void initRTC(){
 	Logger_SD::Instance()->msgL(INFO,F("initRTC(), testing RTC connection..."));
 	RTClock.begin();
 	// verify connection
-	t = RTClock.now();
-	if ( (t.year() > 2050) || (t.year() < 2014) ) {
+	g_time = RTClock.now();
+	if ( (g_time.year() > 2050) || (g_time.year() < 2014) ) {
 		Logger_SD::Instance()->msgL(ERROR,F("Date %d/%d/%d out of range"),
-		t.year(), t.month(), t.day());
+		g_time.year(), g_time.month(), g_time.day());
 	}
 	Logger_SD::Instance()->msgL(INFO,F("Clock reports %d/%02d/%02d at %d:%02d:%02d"),
-	t.year(), t.month(), t.day(),t.hour(), t.minute(), t.second());
+	g_time.year(), g_time.month(), g_time.day(),g_time.hour(), g_time.minute(), g_time.second());
 }
 
 void setupAlarm(){
 }
 void loadConfigValues(){
-	// Load config defaults
+	// Load config defaults. All values in file are integers.
 	int32_t config_value;
 	Logger_SD::Instance()->setDebug(false);
 	// Scheduling
-	config_value = Logger_SD::Instance()->getConfig((char *)"SCHED_RATE1");
-	if ( config_value != -1 ) SCHED_RATE1 = (uint8_t) config_value;
-	config_value  = Logger_SD::Instance()->getConfig((char *)"SCHED_RATE2");
-	if ( config_value != -1 ) SCHED_RATE2 = (uint8_t) config_value;
-	config_value  = Logger_SD::Instance()->getConfig((char *)"SCHED_RATE3");
-	if ( config_value != -1 ) SCHED_RATE3 = (uint8_t) config_value;
-	config_value     = Logger_SD::Instance()->getConfig((char *)"TRIG_DAY");
-	if ( config_value != -1 ) TRIG_DAY = (uint8_t) config_value;
-	config_value    = Logger_SD::Instance()->getConfig((char *)"TRIG_HOUR");
-	if ( config_value != -1 ) TRIG_HOUR = (uint8_t) config_value;
-	config_value  = Logger_SD::Instance()->getConfig((char *)"TRIG_MINUTE");
-	if ( config_value != -1 ) TRIG_MINUTE = (uint8_t) config_value;
-	config_value = Logger_SD::Instance()->getConfig((char *)"SOL_DURATION");
-	if ( config_value != -1 ) SOL_DURATION = (uint16_t) config_value;
-	config_value = Logger_SD::Instance()->getConfig((char *)"DEPLOY_DELAY");
-	if ( config_value != -1 ) DEPLOY_DELAY = (uint16_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"SCHED_RATE1");	        if ( config_value != -1 ) SCHED_RATE1 =        (uint8_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"SCHED_RATE2");	        if ( config_value != -1 ) SCHED_RATE2 =        (uint8_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"SCHED_RATE3");	        if ( config_value != -1 ) SCHED_RATE3 =        (uint8_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"TRIG_DAY");	        if ( config_value != -1 ) TRIG_DAY =           (uint8_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"TRIG_HOUR");	        if ( config_value != -1 ) TRIG_HOUR =          (uint8_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"TRIG_MINUTE");	        if ( config_value != -1 ) TRIG_MINUTE =        (uint8_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"SOL_DURATION");	    if ( config_value != -1 ) SOL_DURATION =       (uint16_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"DEPLOY_DELAY");        if ( config_value != -1 ) DEPLOY_DELAY =       (uint16_t) config_value;
 	// Pressure/Temperature
-	config_value = Logger_SD::Instance()->getConfig((char *)"HAS_PT_SENSOR");
-	if ( config_value != -1 ) HAS_PT_SENSOR = (bool) config_value;
-	config_value = Logger_SD::Instance()->getConfig((char *)"EXT_MS5803_MAX_BAR");
-	if ( config_value != -1 ) EXT_MS5803_MAX_BAR = (uint8_t) config_value;
-	config_value = Logger_SD::Instance()->getConfig((char *)"EXT_MS5803_ADDR");
-	if ( config_value != -1 ) EXT_MS5803_ADDR = (uint8_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"HAS_PT_SENSOR");	    if ( config_value != -1 ) HAS_PT_SENSOR =      (bool) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"EXT_MS5803_MAX_BAR");	if ( config_value != -1 ) EXT_MS5803_MAX_BAR = (uint8_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"EXT_MS5803_ADDR");	    if ( config_value != -1 ) EXT_MS5803_ADDR =    (uint8_t) config_value;
 	// Accelerometer
-	config_value = Logger_SD::Instance()->getConfig((char *)"MPU_VERSION");
-	if ( config_value != -1 ) MPU_VERSION = (uint16_t) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"MPU_VERSION");        	if ( config_value != -1 ) MPU_VERSION =        (uint16_t) config_value;
 	// DO
-	config_value = Logger_SD::Instance()->getConfig((char *)"DO_VERSION");
-	if ( config_value != -1 ) DO_VERSION = (char) config_value;
+	config_value = Logger_SD::Instance()->getConfig((char *)"DO_VERSION");	        if ( config_value != -1 ) DO_VERSION =         (char) config_value;
+	// EC
+	config_value = Logger_SD::Instance()->getConfig((char *)"EC_K_10");	            if ( config_value != -1 ) EC_K =               (float) config_value / 10.0; 
+	
 	Logger_SD::Instance()->setDebug(false);
 }
-

@@ -9,7 +9,8 @@
 #include "HydroSphereRTC.h" // DO and Conductivity sensors
 #include <RTClib.h>      // RTC Clock
 
-
+RTC_DS3234 HSU_RTClock(CLOCK_SS_PIN);
+DateTime HSU_time; // Structure to hold a DateTime
 
 
 float getDensity(float temp_C, float salinity) {
@@ -55,26 +56,33 @@ uint16_t freeRam() {
 /*
 // lowPowerDelay(seconds) - Low Power Delay.  Drops the system clock
 // to its lowest setting and sleeps for (256*quarterSeconds) milliseconds.
-// Also keeps track of clock drift in g_millisDelta
 */
-void lowPowerDelay(uint16_t seconds) {
-  //Logger_SD::Instance()->msgL(DEBUG,"Delaying about %u seconds from %lu",slow_millis);// at %02d:%02d:%02d",Rtc.getHours24(),Rtc.getMinutes(),Rtc.getSeconds());
-  int16_t oldClkPr = CLKPR;  // save old system clock prescale
+void lowPowerDelay(uint16_t delay_secs) {
+  Serial.print("delaying "); Serial.print(delay_secs);
+  //uint8_t buf_len = 20;
+  //char buf[buf_len];
+  //HSU_time = HSU_RTClock.now();
+  uint16_t oldClkPr = CLKPR;  // save old system clock prescale
+  //Logger_SD::Instance()->msgL(DEBUG,"Delaying about %u seconds at %s. CLKPR = %X",delay_secs, HSU_time.toYMDString(buf,buf_len) ,oldClkPr);
+  delay(1000); // Allow time for things to flush and write?
   CLKPR = 0x80;    // Tell the AtMega we want to change the system clock
   CLKPR = 0x08;    // 1/256 prescaler = 60KHz for a 16MHz crystal
-  delay(seconds * 4);  // since the clock is slowed way down, delay(n) now acts like delay(n*256)
+  delay((delay_secs  - 1 )* 4);  // since the clock is slowed way down, delay(n) now acts like delay(n*256)
   CLKPR = 0x80;    // Tell the AtMega we want to change the system clock
-  CLKPR = oldClkPr;    // Restore old system clock prescale
+  //CLKPR = oldClkPr;    // Restore old system clock prescale
+  CLKPR = 0x00;    // Restore old system clock prescale
+  //HSU_time = HSU_RTClock.now();
+  //Logger_SD::Instance()->msgL(DEBUG,"Woke up at %s.", HSU_time.toYMDString(buf,buf_len));
 }
 
-void deepSleep(uint16_t seconds){
+void deepSleep(uint16_t delay_secs){
   /* See 
      https://www.sparkfun.com/tutorials/309 
      for much more
    */
   // Turn off all peripherals?
   Serial.flush();
-  lowPowerDelay(seconds);
+  lowPowerDelay(delay_secs);
   // Turn on Peripherals
 }
 

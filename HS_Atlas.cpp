@@ -30,10 +30,11 @@ bool _getDO(struct DO_Struct *aDO){
 	*/
 	delay(1000);
 	aDO->return_sat = 0;	
-	uint32_t timeout_ms = millis() + 1000;
+	uint32_t start_millis = millis();
+	uint16_t timeout = 1000;
 	while (!SerialDO.available()) { // wait for data up to timeout_ms
 		delay(10);
-		if ( millis() > timeout_ms ) break;
+		if ((millis() - start_millis) >= timeout ) break;
 	}
 	aDO->_sat = SerialDO.parseFloat();
 	aDO->_dox = SerialDO.parseFloat();
@@ -96,14 +97,15 @@ void initCond(struct CondStruct *aCond){
 bool _getCond(struct CondStruct *aCond){
 	/* Prompts for a value. Might be faster to put in continuous mode and just parse.
 	*/
-	uint32_t timeout_ms = millis() + 1000;
+	uint32_t start_millis = millis();
+	uint16_t timeout = 1000;
 	aCond->_ec = 0;
 	aCond->_tds = 0;
 	aCond->_sal = 0;
 	aCond->_sg = 0;
-	while (!SerialCond.available()) { // wait for data up to timeout_ms
+	while (!SerialCond.available()) { // wait for data up to timeout ms
 		delay(10);
-		if ( millis() > timeout_ms ) break;
+		if ( (millis() - start_millis) >= timeout ) break;
 	}
 	aCond->_ec = SerialCond.parseFloat();
 	aCond->_tds = SerialCond.parseFloat();
@@ -117,6 +119,13 @@ bool _getCond(struct CondStruct *aCond){
 	return 1; // Doesn't mean anything
 }
 
+void setCondK(char *ec_k) {
+	// Set probe K value. Can be 0.1, 1.0, 10.0
+	if ( ec_k[0] != 0 ) {// There's something
+		SerialCond.print("k,");
+		SerialCond.println(ec_k);
+	}
+}
 void setCondTemp(float temp_C){
 	char buf[10];
 	char charRead;

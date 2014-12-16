@@ -62,7 +62,7 @@ void lowPowerDelay(uint16_t delay_secs) {
   //uint8_t buf_len = 20;
   //char buf[buf_len];
   //HSU_time = HSU_RTClock.now();
-  uint16_t oldClkPr = CLKPR;  // save old system clock prescale
+  //uint16_t oldClkPr = CLKPR;  // save old system clock prescale
   //Logger_SD::Instance()->msgL(DEBUG,"Delaying about %u seconds at %s. CLKPR = %X",delay_secs, HSU_time.toYMDString(buf,buf_len) ,oldClkPr);
   delay(1000); // Allow time for things to flush and write?
   CLKPR = 0x80;    // Tell the AtMega we want to change the system clock

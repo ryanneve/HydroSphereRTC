@@ -85,7 +85,7 @@ const char SCHED2_FILE[] = "SCHED2.CSV";
 const char SCHED3_FILE[] = "SCHED3.CSV";
 const char CONFIG_FILE[] = "config.txt";
 const char SCHED1_HEADER[] = "Sample Time,GyX,GyY,GyZ,AccX,AccY,AccZ,MagX,MagY,MagZ,Head,VBatt\r\n";
-const char SCHED2_HEADER[] = "Sample Time,ExtTemp,D1temp,Press_mBar,D2press,red,grn,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DO%,DO_mgl,EC,TDS,Sal,SG\r\n";
+const char SCHED2_HEADER[] = "Sample Time,External Temperature,D1press,Press_mBar,D2temp,red,green,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DOsat,DO%,EC,TDS,Sal,SG\r\n";
 const char SCHED3_HEADER[] = "Sample Time,\r\n";
 
 void setup() {
@@ -273,7 +273,7 @@ void sched1() {
 }
 
 void sched2() {
-	/* Log xtTemp,D1temp,Press_mBar,D2press,red,grn,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DO%,DO_mgl,EC,TDS,Sal,SG
+	/* "Sample Time,ExtTemp,D1press,Press_mBar,D2temp,red,grn,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DOsat,DO%,EC,TDS,Sal,SG\r\n";
 	*/
 	g_time = RTClock.now();// Update for logger
 	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched2 entered"));
@@ -295,7 +295,7 @@ void sched2() {
 	
 	// Log readings
 	Logger_SD::Instance()->setSampleFile(SCHED2_FILE);
-	uint16_t log_line_max = 200;
+	uint16_t log_line_max = 250;
 	uint8_t buf_len = 20;
 	char log_output[log_line_max]; uint8_t log_idx = 0;
 	char buf[buf_len];
@@ -324,11 +324,12 @@ void sched2() {
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getLxBlue());
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getLxTotal());
 	log_idx +=sprintf(log_output + log_idx,"%d" ,sensor_RGB.getLxBeyond());
-	
+	// Now DO saturation, %oxy
 	dtostrf(sensor_DO._sat,6,2,buf);
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 	dtostrf(sensor_DO._dox,6,2,buf);
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
+	//Now conductivity: EC, TDS, SAL, SG
 	dtostrf(sensor_COND._ec,7,2,buf);
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 	dtostrf(sensor_COND._tds,7,2,buf);

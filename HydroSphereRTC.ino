@@ -85,7 +85,7 @@ const char SCHED2_FILE[] = "SCHED2.CSV";
 const char SCHED3_FILE[] = "SCHED3.CSV";
 const char CONFIG_FILE[] = "config.txt";
 const char SCHED1_HEADER[] = "Sample Time,GyX,GyY,GyZ,AccX,AccY,AccZ,MagX,MagY,MagZ,Head,VBatt\r\n";
-const char SCHED2_HEADER[] = "Sample Time,External Temperature,D1press,Press_mBar,D2temp,red,green,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DOsat,DO%,EC,TDS,Sal,SG\r\n";
+const char SCHED2_HEADER[] = "Sample Time,External Temperature,Press_mBar,D1press,D2temp,red,green,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DOsat,DO%,EC,TDS,Sal,SG\r\n";
 const char SCHED3_HEADER[] = "Sample Time,\r\n";
 
 void setup() {
@@ -289,7 +289,7 @@ void sched2() {
 		ext_temperature = get_analog_temperature(TEMPERATURE_PIN);
 		Serial.print("Analog temperature is "); Serial.println(ext_temperature);
 	}
-	//setCondTemp(ext_temperature); // Causing problems
+	setCondTemp(ext_temperature); // Causing problems
 	getCond(&sensor_COND);// conductivity.
 	getCompDO(&sensor_DO,&sensor_COND,ext_temperature);
 	
@@ -300,13 +300,16 @@ void sched2() {
 	char log_output[log_line_max]; uint8_t log_idx = 0;
 	char buf[buf_len];
 	g_time = RTClock.now();// Update for logger
+	// Timestamp NEEDS TO INCLUDE SECONDS!
 	log_idx +=sprintf(log_output + log_idx,"%s,",g_time.toYMDString(buf,buf_len));
+	// External Temperature
 	dtostrf(ext_temperature,6,3,buf);
+	// Pressure and diagnostics
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 	if ( HAS_PT_SENSOR ) {
-		itoa(presstemp.getD1Pressure(),buf,10);
-		log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 		dtostrf(presstemp.press_mBar,6,3,buf);
+		log_idx +=sprintf(log_output + log_idx,"%s,",buf);
+		itoa(presstemp.getD1Pressure(),buf,10);
 		log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 		itoa(presstemp.getD2Temperature(),buf,10);
 		log_idx +=sprintf(log_output + log_idx,"%s,",buf);
@@ -316,6 +319,7 @@ void sched2() {
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // pressure is zero
 		log_idx +=sprintf(log_output + log_idx,"0000,"); // D2press is zero
 	}
+	// Light sensor readings
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getRed());
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getGreen());
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getBlue());
@@ -323,11 +327,11 @@ void sched2() {
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getLxGreen());
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getLxBlue());
 	log_idx +=sprintf(log_output + log_idx,"%d,",sensor_RGB.getLxTotal());
-	log_idx +=sprintf(log_output + log_idx,"%d" ,sensor_RGB.getLxBeyond());
+	log_idx +=sprintf(log_output + log_idx,"%d," ,sensor_RGB.getLxBeyond());
 	// Now DO saturation, %oxy
-	dtostrf(sensor_DO._sat,6,2,buf);
+	dtostrf(sensor_DO._sat,8,2,buf);
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
-	dtostrf(sensor_DO._dox,6,2,buf);
+	dtostrf(sensor_DO._dox,8,2,buf);
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
 	//Now conductivity: EC, TDS, SAL, SG
 	dtostrf(sensor_COND._ec,7,2,buf);

@@ -127,23 +127,33 @@ void setCondK(char *ec_k) {
 	}
 }
 void setCondTemp(float temp_C){
-	char buf[10];
+	char buf[50];
 	char charRead;
 	uint8_t sig_fig = 4;
-	dtostrf(temp_C / 100,sig_fig,1,buf);
+	dtostrf(temp_C,sig_fig,1,buf);
+	Logger_SD::Instance()->msgL(INFO,F("Setting EC temperature to %s."),buf);
 	Serial.print("sending: T,"); Serial.write(buf,sig_fig); Serial.println("<CR>");
 	SerialCond.write('T');
 	SerialCond.write(',');
-	Serial.write(buf,sig_fig);
+	SerialCond.print(buf);
 	SerialCond.write(13);
 	delay(1500);
-	Serial.println("COND Temp Set response:");
+	// Response:
+	int16_t i = 1;
 	while ( SerialCond.available() ) {
 		charRead = SerialCond.read();
-		Serial.write(charRead);
-		if ( charRead == 13 ) Serial.write(10);
+		buf[i] = charRead;
+		i++;
+		if ( i >= 48 ) break;
+		//Serial.write(charRead);
+		if ( charRead == 13 )  {
+		  buf[i] = 10;
+		  i++;
+		}
+		delay(50); // Time for another character...
 	}
-	Serial.println("]");
+	buf[i] = 0; // null terminate
+	Logger_SD::Instance()->msgL(INFO,F("HS_Atlas.setCondTemp response: [%s]."),buf);
 }
 
 bool getCond(struct CondStruct *aCond){

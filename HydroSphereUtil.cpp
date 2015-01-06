@@ -59,20 +59,16 @@ uint16_t freeRam() {
 */
 void lowPowerDelay(uint16_t delay_secs) {
   Serial.print("delaying "); Serial.print(delay_secs);
-  //uint8_t buf_len = 20;
-  //char buf[buf_len];
-  //HSU_time = HSU_RTClock.now();
-  //uint16_t oldClkPr = CLKPR;  // save old system clock prescale
-  //Logger_SD::Instance()->msgL(DEBUG,"Delaying about %u seconds at %s. CLKPR = %X",delay_secs, HSU_time.toYMDString(buf,buf_len) ,oldClkPr);
+  if ( delay_secs <= 2 ) return ;
+  uint16_t oldClkPr = CLKPR;  // save old system clock prescale
+  //Logger_SD::Instance()->msgL(DEBUG,F("Delaying about %u seconds. CLKPR = %X"),delay_secs,oldClkPr);
   delay(1000); // Allow time for things to flush and write?
   CLKPR = 0x80;    // Tell the AtMega we want to change the system clock
   CLKPR = 0x08;    // 1/256 prescaler = 60KHz for a 16MHz crystal
-  delay((delay_secs  - 1 )* 4);  // since the clock is slowed way down, delay(n) now acts like delay(n*256)
+  delay((delay_secs  - 2 )* 4);  // since the clock is slowed way down, delay(n) now acts like delay(n*256)
   CLKPR = 0x80;    // Tell the AtMega we want to change the system clock
-  //CLKPR = oldClkPr;    // Restore old system clock prescale
-  CLKPR = 0x00;    // Restore old system clock prescale
-  //HSU_time = HSU_RTClock.now();
-  //Logger_SD::Instance()->msgL(DEBUG,"Woke up at %s.", HSU_time.toYMDString(buf,buf_len));
+  CLKPR = oldClkPr;    // Restore old system clock prescale
+  delay(1000);
 }
 
 void deepSleep(uint16_t delay_secs){
@@ -92,4 +88,143 @@ float get_analog_temperature(uint8_t analog_pin) {
     adc_val *= 1000; //millivolts
     float temp_C = ( 0.0512 * adc_val ) - 20.5128;
     return temp_C;
+}
+
+void hs_console(){
+	/* HydroSphere console.
+		Functions include:
+			Download data files
+			clear data files
+			exit
+	*/
+	char read_byte;
+	do {
+		// Prompt
+		Serial.println(F("HydroSphere Console"));
+		Serial.println(F("1 - Download Data Files"));
+		Serial.println(F("2 - Delete Data Files"));
+		Serial.println(F("0 - Exit console mode"));
+		// Look for and process input
+		read_byte = getByte0(true);
+		switch (read_byte){
+		case '1':
+		    HSconsoleDownloadData();
+		    break;
+		    case '2':
+		    HSconsoleDeleteData();
+		    break;
+		    case '0':
+		    Serial.println(F("Exiting console mode"));
+		    return;
+		    break;
+		    default:
+		    continue;
+		}
+	} while(1);
+}
+
+void HSconsoleDownloadData(){
+	char read_byte;
+	do 
+	{
+		// Prompt for which file to download
+		Serial.println(F("Select file to download:"));
+		Serial.print("1 - "); Serial.println(SCHED1_FILE);
+		Serial.print("2 - "); Serial.println(SCHED2_FILE);
+		Serial.print("3 - "); Serial.println(SCHED3_FILE);
+		Serial.print("9 - "); Serial.println(LOG_FILE);
+		Serial.println(F("0 - Exit download mode"));
+		read_byte = getByte0(true);
+		switch (read_byte) {
+			case '1':
+				Logger_SD::Instance()->setSampleFile(SCHED1_FILE);
+				downloadFile();
+				break;
+			case '2':
+				Logger_SD::Instance()->setSampleFile(SCHED2_FILE);
+				downloadFile();
+				break;
+			case '3':
+				Logger_SD::Instance()->setSampleFile(SCHED3_FILE);
+				downloadFile();
+				break;
+			case '9':
+			    Serial.println(F("Not supported yet"));
+				break;
+			case '0':
+				return;
+			default:
+				continue;
+		}
+	} while (true);	
+}
+void downloadFile(){
+	const uint16_t DUMP_DELAY = 5;
+	Serial.print(F("Prepare to Capture file: "));
+	for ( uint16_t i = DUMP_DELAY; i > 0 ; i-- ) {
+		delay(1000);
+		Serial.print(i); Serial.print(' ');
+	}
+	Serial.println();
+	Logger_SD::Instance()->dumpSampleFile();
+	Serial.println("DONE");
+	delay(5000); // Time to end capture
+}
+
+void HSconsoleDeleteData(){
+	char read_byte;
+	do	{
+		// Prompt for which file to download
+		Serial.println(F("Select file to delete:"));
+		Serial.print("1 - "); Serial.println(SCHED1_FILE);
+		Serial.print("2 - "); Serial.println(SCHED2_FILE);
+		Serial.print("3 - "); Serial.println(SCHED3_FILE);
+		Serial.print("9 - "); Serial.println(LOG_FILE);
+		Serial.println(F("0 - Exit delete mode"));
+		read_byte = getByte0(true);
+		switch (read_byte) {
+			case '1':
+			Logger_SD::Instance()->setSampleFile(SCHED1_FILE);
+			Logger_SD::Instance()->deleteSampleFile();
+			break;
+			case '2':
+			Logger_SD::Instance()->setSampleFile(SCHED2_FILE);
+			Logger_SD::Instance()->deleteSampleFile();
+			break;
+			case '3':
+			Logger_SD::Instance()->setSampleFile(SCHED3_FILE);
+			Logger_SD::Instance()->deleteSampleFile();
+			//break;
+			case '9':
+			Logger_SD::Instance()->deleteLogFile();
+			break;
+			case '0':
+			return;
+			default:
+			continue;
+		}
+	} while (true);	
+}
+
+uint16_t clearSerial0() {
+	uint16_t chars = 0;
+	while ( Serial.available() ) {
+		Serial.read();
+		chars++;
+	}
+	return chars;
+}
+
+char getByte0(bool ignore_EOL){
+	char read_byte = 0;
+	clearSerial0();
+	do {
+		if ( Serial.available() ) {
+			read_byte = Serial.read();
+			if  ( ignore_EOL && ( read_byte == 13 || read_byte == 10 )) read_byte = 0;
+		}
+		else delay(100);
+	} while ( !read_byte );
+	clearSerial0();
+	return read_byte;
 }

@@ -79,13 +79,15 @@ uint32_t g_now_unixtime;
 uint32_t g_delay_start;
 bool g_sol_triggered = false;
 const bool LOG_DEBUG = true; // Send DEBUG messages to log file?
+/*
 const char LOG_FILE[]    = "HS_LOG.CSV";
 const char SCHED1_FILE[] = "SCHED1.CSV";
 const char SCHED2_FILE[] = "SCHED2.CSV";
 const char SCHED3_FILE[] = "SCHED3.CSV";
 const char CONFIG_FILE[] = "config.txt";
+*/
 const char SCHED1_HEADER[] = "Sample Time,GyX,GyY,GyZ,AccX,AccY,AccZ,MagX,MagY,MagZ,Head,VBatt\r\n";
-const char SCHED2_HEADER[] = "Sample Time,External Temperature,Press_mBar,D1press,D2temp,red,green,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DOsat,DO%,EC,TDS,Sal,SG\r\n";
+const char SCHED2_HEADER[] = "Sample Time,External Temperature,Press_mBar,D1press,D2temp,red,green,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DO%,DO_mg/L,EC,TDS,Sal,SG\r\n";
 const char SCHED3_HEADER[] = "Sample Time,\r\n";
 
 void setup() {
@@ -143,7 +145,37 @@ void setup() {
 	Logger_SD::Instance()->msgL(INFO,F("Schedule rates set to %d, %d & %d."),SCHED_RATE1,SCHED_RATE2,SCHED_RATE3);
 	Logger_SD::Instance()->msgL(INFO,F("Trigger date set to day %d at %d:%02d"),TRIG_DAY,TRIG_HOUR,TRIG_MINUTE);
 	Logger_SD::Instance()->msgL(INFO,F("Trigger duration set to %d ms"),SOL_DURATION);
-	// First check if is's time to do schedule
+	while ( Serial.available() ) Serial.read(); // clear buffer
+	
+	// Go into console mode?
+	g_time = RTClock.now();
+	char in_byte = 0;
+	g_time = RTClock.now();
+	const double CONSOLE_START = g_time.unixtime();
+	Serial.println("Press c to go into console mode");
+	while (!in_byte){
+		if ( Serial.available() ) in_byte = Serial.read();
+		// Now we need a timeout
+		g_time = RTClock.now();
+		if ( g_time.unixtime() > CONSOLE_START + HS_CONSOLE_DELAY ) break;
+		else delay(100);
+	}
+	g_time = RTClock.now();
+	switch ( in_byte ) {
+		case 'c':
+		case 'C':
+			hs_console();
+			break;
+		case 'x':
+			g_delay_start = g_time.unixtime(); // skip initial delay
+			break;
+		case 0:
+			break;
+		default:
+			Logger_SD::Instance()->msgL(INFO,F("Console prompt got %d"), in_byte);
+	}
+	
+	// First check if it's time to do schedule
 	g_time = RTClock.now();
 	if ( g_delay_start > g_time.unixtime() ) {
 		Logger_SD::Instance()->msgL(INFO,F("Delaying instrument start %d minutes"), DEPLOY_DELAY);
@@ -157,11 +189,13 @@ void loop() {
 	/**/
 	g_time = RTClock.now();
 	g_now_unixtime = g_time.unixtime(); // This is the time of the beginning of the loop. Not updated until next loop.
+	/*
 	Serial.print(g_now_unixtime); Serial.print(" >--> "); Serial.println(g_sched_time.unixtime());
 	Serial.print('('); Serial.print(g_Sched1);
 	Serial.print(','); Serial.print(g_Sched2);
 	Serial.print(','); Serial.print(g_Sched3);
 	Serial.println(')');
+	*/
 	if ( !g_sol_triggered ) checkSolenoid(); // triggered only once;
 	if ( g_now_unixtime >= g_Sched1 && SCHED_RATE1 > 0 ) do_sched1 = true;
 	if ( g_now_unixtime >= g_Sched2 && SCHED_RATE2 > 0 ) do_sched2 = true;
@@ -186,7 +220,7 @@ void loop() {
 		}
 		g_time = RTClock.now();
 		Logger_SD::Instance()->msgL(DEBUG,F("Done with schedules."));
-		// Get the next occurence
+		// Get the next occurrence
 		g_SchedNext = min(g_Sched1,min(g_Sched2,g_Sched3));
 		int32_t lp_delay = (int32_t)g_SchedNext - (int32_t)g_time.unixtime() - 1; // Sleep for one sec less than we need to
 		if ( lp_delay > 0 ) {
@@ -194,9 +228,8 @@ void loop() {
 			char buf[buf_len];
 			g_sched_time.setFromUNIX(g_SchedNext);
 			g_sched_time.toString(buf,buf_len);
-			Serial.println(lp_delay);
 			Serial.println(buf);
-			Logger_SD::Instance()->msgL(DEBUG,F("Next action in %d seconds at %s."),lp_delay,buf);
+			Logger_SD::Instance()->msgL(DEBUG,F("Next action in %d seconds at %s"),lp_delay,buf);
 			Serial.flush();
 			delay(100);
 			lowPowerDelay((uint16_t)lp_delay);
@@ -275,37 +308,40 @@ void sched1() {
 void sched2() {
 	/* "Sample Time,ExtTemp,D1press,Press_mBar,D2temp,red,grn,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DOsat,DO%,EC,TDS,Sal,SG\r\n";
 	*/
+	float ext_temperature;
+	uint16_t log_line_max = 250;
+	char log_output[log_line_max];
+	uint8_t log_idx = 0;
+	uint8_t buf_len = 20;
+	char buf[buf_len];
 	g_time = RTClock.now();// Update for logger
 	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched2 entered"));
 	if ( not sensor_RGB.getContinuous() ) sensor_RGB.getRGB(); // Get some new values
-	// Now DO and Conductivity sensors
-	float ext_temperature;
 	if ( HAS_PT_SENSOR) {
 		presstemp.getPressure(true);
 		ext_temperature = presstemp.getTemperature()/100; // returns float
-		Serial.print("Digital temperature is "); Serial.println(ext_temperature);
+		//Serial.print(F("Digital temperature is "); Serial.println(ext_temperature);
+		Logger_SD::Instance()->msgL(INFO,F("Digital temperature is %f"),ext_temperature);
 	}
 	else {
 		ext_temperature = get_analog_temperature(TEMPERATURE_PIN);
-		Serial.print("Analog temperature is "); Serial.println(ext_temperature);
+		//Serial.print(F("Analog temperature is ")); Serial.println(ext_temperature);
+		Logger_SD::Instance()->msgL(INFO,F("Analog temperature is %f"),ext_temperature);
 	}
 	setCondTemp(ext_temperature); // Causing problems
 	getCond(&sensor_COND);// conductivity.
-	getCompDO(&sensor_DO,&sensor_COND,ext_temperature);
+	
+	setDOtemp_cond(ext_temperature,sensor_COND._ec);
+	getDO(&sensor_DO);
 	
 	// Log readings
 	Logger_SD::Instance()->setSampleFile(SCHED2_FILE);
-	uint16_t log_line_max = 250;
-	uint8_t buf_len = 20;
-	char log_output[log_line_max]; uint8_t log_idx = 0;
-	char buf[buf_len];
 	g_time = RTClock.now();// Update for logger
-	// Timestamp NEEDS TO INCLUDE SECONDS!
 	log_idx +=sprintf(log_output + log_idx,"%s,",g_time.toYMDString(buf,buf_len));
-	// External Temperature
-	dtostrf(ext_temperature,6,3,buf);
-	// Pressure and diagnostics
+	dtostrf(ext_temperature,6,3,buf);	// External Temperature
 	log_idx +=sprintf(log_output + log_idx,"%s,",buf);
+	
+	// Pressure and diagnostics
 	if ( HAS_PT_SENSOR ) {
 		dtostrf(presstemp.press_mBar,6,3,buf);
 		log_idx +=sprintf(log_output + log_idx,"%s,",buf);
@@ -388,7 +424,7 @@ bool checkSolenoid(){
 		// Now check time.
 		g_time = RTClock.now();
 		if ( TRIG_DAY == g_time.day() ) { // Date matches
-			Serial.println("DAY matches");
+			//Serial.println("DAY matches");
 			Logger_SD::Instance()->msgL(DEBUG,F("Looking for %d:%d >= %d:%d"),g_time.hour(),g_time.minute(), TRIG_HOUR,TRIG_MINUTE);
 			if ( (TRIG_HOUR < g_time.hour()) || ( TRIG_HOUR == g_time.hour() && TRIG_MINUTE <= g_time.minute() )) { // Hour matches or has passed. Minute is now or has passed.
 				uint8_t time_str_len = 20;
@@ -397,7 +433,7 @@ bool checkSolenoid(){
 				Logger_SD::Instance()->msgL(WARN,F("Current time %s >= trigger time %d-%d:%d"),g_time.toYMDString(time_str,time_str_len),TRIG_DAY,TRIG_HOUR,TRIG_MINUTE);
 				trigger = true;
 			}
-			Serial.println("Didn't find it");
+			Logger_SD::Instance()->msgL(INFO,F("Didn't find trigger match"));
 		}
 		// Check RTC
 		if ( RTClock.checkIfAlarm(2) ) {

@@ -22,10 +22,10 @@ bool recentSample(char time[7], int16_t fresh_time);
 struct DO_Struct {
 	char _version;
 	bool    return_sat;
-	float   _dox;
-	char    dox[10]; // Ends in \0
 	float   _sat;
 	char    saturation[10]; // Ends in \0
+	float   _dox;
+	char    dox[10]; // Ends in \0
 	char    sample_time[7]; // HHmmss\0
 	char    comm_error;
 };
@@ -49,6 +49,10 @@ struct CondStruct {
 void initDO();
 void setDO_version(struct DO_Struct *aDO,char ver);// Either '5', '6', or 'E' for EZO
 bool _getDO(struct DO_Struct *aDO);
+bool getDO(struct DO_Struct *aDO);
+void setDOtemp_cond(float temp_C,float cond);
+bool getContDO(struct DO_Struct *aDO);
+uint16_t clearDObuffer(bool verbose);
 bool getCompDO(struct DO_Struct *aDO,struct CondStruct *aCond,float temp_C);
 bool getBasicDO(struct DO_Struct *aDO);
 void toggleDOSat();
@@ -62,6 +66,10 @@ bool getCond(struct CondStruct *aCond);
 void quietCond();
 void setCondContinuous();
 
-void DO_testing(struct DO_Struct *aDO,struct CondStruct *aCond,float temp_C);
-
 #endif
+
+
+/*----------( Constants )----------*/
+const char DO_SINGLE_SAMPLE[] = "R\n";
+const char DO_QUIET[]         = "E\n";
+const char DO_CONTINUOUS[]    = "C\n";

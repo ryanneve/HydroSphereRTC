@@ -36,20 +36,109 @@ bool _getDO(struct DO_Struct *aDO){
 		delay(10);
 		if ((millis() - start_millis) >= timeout ) break;
 	}
-	aDO->_sat = SerialDO.parseFloat();
-	aDO->_dox = SerialDO.parseFloat();
+	float parsed_value = SerialDO.parseFloat();
+	char terminator = SerialDO.peek();
+	if ( terminator == ',' ) aDO->_sat = parsed_value;
+	else if ( terminator == 13 )	aDO->_dox = SerialDO.parseFloat();
 	if ( g_atlas_debug ) {
+		Logger_SD::Instance()->msgL(DEBUG,F("DO sensor \%sat, DOx %f\%,%f"),aDO->_sat,aDO->_dox);
 		Serial.println("DO sensor %sat, DOx ");
 		Serial.print(aDO->_sat);
 		Serial.print("%,");
 		Serial.println(aDO->_dox);
 	}
+	// Now check to see if values are reasonable
+	if ( aDO->_sat > 100 ) return 0; // Can't have < 100%
 	return 1; // 1 = success. Need to check this better.
+}
+bool getDO(struct DO_Struct *aDO) {
+	char terminator;
+	bool result = 0;
+	uint8_t bytes_returned;
+	char buf[20];
+	// clear previous values
+	aDO->_sat = -1.0;
+	aDO->_dox = -1.0;
+	// clear buffer.
+	clearDObuffer(true);
+	// Send DO requests
+	for (uint8_t i = 0 ; i < 4 ; i++){
+		SerialDO.print(DO_SINGLE_SAMPLE);
+		delay(200);
+	}
+	// read response
+	delay(3000);
+	terminator = ',';
+	bytes_returned = SerialDO.readBytesUntil(terminator,buf,19);
+	if ( bytes_returned ) {
+		result = 1;
+		buf[bytes_returned] = 0;
+		aDO->_sat = atof(buf);
+	}
+	terminator = '\n';
+	bytes_returned = SerialDO.readBytesUntil(terminator,buf,19);
+	if ( bytes_returned ) {
+		result = 1;
+		buf[bytes_returned] = 0;
+		aDO->_dox = atof(buf);
+	}
+	Logger_SD::Instance()->msgL(DEBUG,F("DO sensor \%sat, DOx %f\%,%f"),aDO->_sat,aDO->_dox);
+	/*
+	Serial.println("DO sensor %sat, DOx ");
+	Serial.print(aDO->_sat);
+	Serial.print("%,");
+	Serial.println(aDO->_dox);
+	Serial.println(aDO->_sat);
+	Serial.println(aDO->_dox);
+	*/
+	return result;
+}
+
+void setDOtemp_cond(float temp_C,float cond){
+	char buf1[10];
+	char buf2[10];
+	dtostrf(temp_C,6,2,buf1); // Convert temperature from float to char array with two decimal places.
+	dtostrf(cond,6,2,buf2); // Convert conductivity from float to char array with two decimal places.
+	if ( g_atlas_debug ) {
+		Logger_SD::Instance()->msgL(DEBUG,F("setDOtemp_cond Setting Temperature and Conductivity: %s,%s"),buf1,buf2);
+	}
+	// Send command to DO sensor. Format is <temperature>
+	SerialDO.write(buf1,6);
+	SerialDO.write(',');
+	SerialDO.write(buf2,6);
+	SerialDO.write(13);	
+}
+bool getContDO(struct DO_Struct *aDO){
+	// Get DO while in continuous mode
+	// Clear out buffer.
+	clearDObuffer(false);
+	char terminator[] = "\n";
+	// Wait for next <CR>
+	SerialDO.setTimeout(3000);
+	SerialDO.find(terminator);
+	SerialDO.setTimeout(1000);
+	// Wait for next data
+	delay(1000);
+	// Parse
+	return _getDO(aDO);
+}
+uint16_t clearDObuffer(bool verbose){
+	uint16_t cleared = 0;
+	char byte_read;
+	if ( verbose ) Logger_SD::Instance()->msgL(DEBUG,F("Clearing DO buffer."));
+	while (SerialDO.available()) { // wait for data up to timeout_ms
+		byte_read = SerialDO.read();
+		if ( verbose ) Serial.print(byte_read);
+		cleared++;
+	}
+	if ( verbose ) Serial.println();
+	return cleared;
 }
 bool getCompDO(struct DO_Struct *aDO, struct CondStruct *aCond, float temp_C){
 	char buf[10];
 	//uint8_t sig_fig = 3;
 	dtostrf(temp_C,6,2,buf); // Convert temperature from float to char array with two decimal places.
+	/*
 	if ( g_atlas_debug ) {
 		Serial.println("getCompDO Setting Temperature:");
 		Serial.print(buf);
@@ -58,7 +147,7 @@ bool getCompDO(struct DO_Struct *aDO, struct CondStruct *aCond, float temp_C){
 		Serial.println("<CR>");
 		Serial.write('R');
 		Serial.println("<CR>");
-	}
+	} */
 	// Send command to DO sensor. Format is <temperature>
 	SerialDO.write(buf,6);
 	SerialDO.write(',');
@@ -111,14 +200,16 @@ bool _getCond(struct CondStruct *aCond){
 	aCond->_tds = SerialCond.parseFloat();
 	aCond->_sal = SerialCond.parseFloat();
 	aCond->_sg = SerialCond.parseFloat();
+	/*
 	Serial.println("Conductivity values: EC, TDS, SAL, SG");
 	Serial.print(aCond->_ec);  Serial.write(',');
 	Serial.print(aCond->_tds); Serial.write(',');
 	Serial.print(aCond->_sal); Serial.write(',');
 	Serial.print(aCond->_sg);  Serial.println();
-	return 1; // Doesn't mean anything
+	*/
+	Logger_SD::Instance()->msgL(INFO,F("Conductivity values: EC, TDS, SAL, SG %f,%f,%f,%f"),
+		aCond->_ec,aCond->_tds,aCond->_sal,aCond->_sg);
 }
-
 void setCondK(char *ec_k) {
 	// Set probe K value. Can be 0.1, 1.0, 10.0
 	if ( ec_k[0] != 0 ) {// There's something
@@ -132,11 +223,10 @@ void setCondTemp(float temp_C){
 	uint8_t sig_fig = 4;
 	dtostrf(temp_C,sig_fig,1,buf);
 	Logger_SD::Instance()->msgL(INFO,F("Setting EC temperature to %s."),buf);
-	Serial.print("sending: T,"); Serial.write(buf,sig_fig); Serial.println("<CR>");
-	SerialCond.write('T');
-	SerialCond.write(',');
+	// Serial.print("sending: T,"); Serial.write(buf,sig_fig); Serial.println("<CR>");
+	SerialCond.print("T,");
 	SerialCond.print(buf);
-	SerialCond.write(13);
+	SerialCond.write(13); // CR
 	delay(1500);
 	// Response:
 	int16_t i = 1;
@@ -158,13 +248,13 @@ void setCondTemp(float temp_C){
 
 bool getCond(struct CondStruct *aCond){
 	char charRead;
-	Serial.print("getCond clearing buffer: [");
+	Serial.print("f(getCond clearing buffer: [");
 	while ( SerialCond.available() ) {
 		charRead = SerialCond.read();
 		if ( charRead == 13 ) Serial.print("<CR>");
 		else Serial.write(charRead);
 	}
-	Serial.println("]\r\nRequesting data");
+	Serial.println(F("]\r\nRequesting Conductivity data");
 	SerialCond.write('R');
 	SerialCond.write(13);
 	delay(1500);
@@ -183,28 +273,4 @@ void setCondContinuous() {
 	SerialCond.write(',');
 	SerialCond.write('1');
 	SerialCond.write(13);
-}
-
-void DO_testing(struct DO_Struct *aDO, CondStruct *aCond,float temp_C){
-	Serial.println("DO----------------");
-	delay(500);
-	aDO->comm_error = getCompDO(aDO,aCond,temp_C);
-	if (!aDO->comm_error) {
-		Serial.print("DO: "); Serial.println(aDO->dox);
-		if ( aDO->return_sat ) {
-			Serial.print("DO saturation: "); Serial.println(aDO->saturation);
-		}
-	}
-	else Serial.print(F("DO Communications Error ")); Serial.println(aDO->comm_error,DEC);
-
-	if ( !aDO->return_sat) toggleDOSat();
-	Serial.println("COND----------------");
-	delay(500);
-	aCond->comm_error = getCond(aCond);
-	if (!aCond->comm_error) {
-		Serial.print("EC: "); Serial.print(aCond->ec);
-		Serial.print("uS/cm\r\nTDS: "); Serial.println(aCond->tds);
-		Serial.print("SAL: "); Serial.println(aCond->sal);
-	}
-	else Serial.print(F("Conductivity Communications Error:")); Serial.println(aCond->comm_error,DEC);
 }

@@ -36,8 +36,8 @@ struct CondStruct {
 	float   _tds;
 	float   _sal;
 	float   _sg;
-	char    tds[10];
 	char    ec[10]; // Ends in \0
+	char    tds[10];
 	char    sal[10]; // Ends in \0
 	char    sg[10]; // Ends in \0
 	char    sample_time[7]; // HHmmss\0

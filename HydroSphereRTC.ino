@@ -6,6 +6,7 @@ Desired schedule:
 3)  300 seconds: DO, temperature, conductivity.
 */
 #include "HydroSphereRTC.h" // DO and Conductivity sensors
+#include <avr/wdt.h>     // Watchdog timer
 #include <SPI.h>         // For SD card and clock
 #include <SdFat.h>          // SPI SD card
 #include <RTClib.h>      // RTC Clock
@@ -14,7 +15,7 @@ Desired schedule:
 #include <I2Cdev.h>      // For HS_OpenROV libraries
 #include <AK8975.h>      // For HS_OpenROV magnetometer
 #include <MPU6050.h>     // For HS_OpenROV accel and gyro
-#include <MS5803_I2C.h>  // fot HS_OpenRov pressure and temperature
+#include <MS5803_I2C.h>  // for HS_OpenRov pressure and temperature
 //#include <DS3234.h>      // SPI RTC Clock
 #include <Atlas_RGB.h>   // RGB sensor
 #include "HS_Atlas.h"    // DO & COND
@@ -31,8 +32,8 @@ uint8_t SCHED_RATE2 = 30; // Must be multiple of SCHED_RATE1
 uint8_t SCHED_RATE3 = 60;// Must be multiple of SCHED_RATE1
 uint8_t EXT_MS5803_MAX_BAR = 5;  // OpenROV uses MS5803-14. We will be using -05 or -01
 uint8_t EXT_MS5803_ADDR = 0x76;  // i2c address
-uint8_t INT_MS5803_MAX_BAR = 5;  //
-uint8_t INT_MS5803_ADDR = 0x77;  // i2c address
+//uint8_t INT_MS5803_MAX_BAR = 5;  //
+//uint8_t INT_MS5803_ADDR = 0x77;  // i2c address
 
 // Trigger date/time. These come from config.txt
 uint8_t TRIG_DAY = 1;
@@ -79,19 +80,13 @@ uint32_t g_now_unixtime;
 uint32_t g_delay_start;
 bool g_sol_triggered = false;
 const bool LOG_DEBUG = true; // Send DEBUG messages to log file?
-/*
-const char LOG_FILE[]    = "HS_LOG.CSV";
-const char SCHED1_FILE[] = "SCHED1.CSV";
-const char SCHED2_FILE[] = "SCHED2.CSV";
-const char SCHED3_FILE[] = "SCHED3.CSV";
-const char CONFIG_FILE[] = "config.txt";
-*/
 const char SCHED1_HEADER[] = "Sample Time,GyX,GyY,GyZ,AccX,AccY,AccZ,MagX,MagY,MagZ,Head,VBatt\r\n";
 const char SCHED2_HEADER[] = "Sample Time,External Temperature,Press_mBar,D1press,D2temp,red,green,blue,lux_r,lux_g,lux_b,lux_tot,lux_beyond,DO%,DO_mg/L,EC,TDS,Sal,SG\r\n";
 const char SCHED3_HEADER[] = "Sample Time,\r\n";
 
 void setup() {
-	Serial.begin(115200);
+	wdt_disable(); // Disable watchdog
+	Serial.begin(57600);
 	for (uint8_t i = 0; i < 80 ; i++) Serial.print('-');
 	Serial.println();
 	pinMode(SOLENOID_PIN,OUTPUT);
@@ -128,18 +123,14 @@ void setup() {
 	initCond(&sensor_COND);
 	sensor_RGB.initialize(3,true); // mode 2, quiet = false (continuous mode)
 	presstemp.setAddress(EXT_MS5803_ADDR);
-	presstemp.initialize(EXT_MS5803_MAX_BAR);
-	bool result = presstemp.testConnection();
-	if ( result ) Logger_SD::Instance()->msgL(INFO,F("MS5803 connection successful"));
-	else {
-		uint8_t dev_addr = presstemp.getAddress();
-		Logger_SD::Instance()->msgL(WARN,F("MS5803 connection failed with address %#Xh"),dev_addr);
-	}
-	presstemp.debugCalConstants();
+	if ( presstemp.initialize(EXT_MS5803_MAX_BAR,true)) Logger_SD::Instance()->msgL(INFO,F("MS5803 initialization successful"));
+	else Logger_SD::Instance()->msgL(WARN,F("MS5803 initialization failed."));
+	if ( presstemp.testConnection() ) Logger_SD::Instance()->msgL(INFO,F("MS5803 connection successful"));
+	else Logger_SD::Instance()->msgL(WARN,F("MS5803 connection failed with address %#Xh"),presstemp.getAddress());
 	// Record pressure and temperature calibration constants
-	for ( uint8_t c = 1 ; c <= 6 ; c++ ) {
+	/*for ( uint8_t c = 1 ; c <= 6 ; c++ ) {
 		Logger_SD::Instance()->msgL(INFO,F("MS5803-%02i Cal Constant %u = %li"),EXT_MS5803_MAX_BAR, c,presstemp.getCalConstant(c));
-	}
+	}*/
 	if (MPU_VERSION != 0) setupAccelGyro(); // gyrocompass
 	// Some debug info
 	Logger_SD::Instance()->msgL(INFO,F("Schedule rates set to %d, %d & %d."),SCHED_RATE1,SCHED_RATE2,SCHED_RATE3);
@@ -183,10 +174,12 @@ void setup() {
 		delay(100);
 		lowPowerDelay((uint16_t)(g_delay_start - g_time.unixtime()));
 	}
+	//watchdogSetup(); // Need to do wdt_reset() at least every 8 seconds.
 }
 
 void loop() {
 	/**/
+	wdt_reset(); // Reset watchdog timer
 	g_time = RTClock.now();
 	g_now_unixtime = g_time.unixtime(); // This is the time of the beginning of the loop. Not updated until next loop.
 	/*
@@ -318,15 +311,19 @@ void sched2() {
 	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched2 entered"));
 	if ( not sensor_RGB.getContinuous() ) sensor_RGB.getRGB(); // Get some new values
 	if ( HAS_PT_SENSOR) {
-		presstemp.getPressure(true);
-		ext_temperature = presstemp.getTemperature()/100; // returns float
+		presstemp.getMeasurements(ADC_512,true);
+		ext_temperature = presstemp.temp_C; // returns float
+		//ext_temperature = presstemp.getTemperature()/100; // returns float
+		//presstemp.getPressure(true);
 		//Serial.print(F("Digital temperature is "); Serial.println(ext_temperature);
-		Logger_SD::Instance()->msgL(INFO,F("Digital temperature is %f"),ext_temperature);
+		dtostrf(ext_temperature,6,3,buf);
+		Logger_SD::Instance()->msgL(INFO,F("Digital temperature is %s"),buf);
 	}
 	else {
 		ext_temperature = get_analog_temperature(TEMPERATURE_PIN);
 		//Serial.print(F("Analog temperature is ")); Serial.println(ext_temperature);
-		Logger_SD::Instance()->msgL(INFO,F("Analog temperature is %f"),ext_temperature);
+		dtostrf(ext_temperature,6,3,buf);
+		Logger_SD::Instance()->msgL(INFO,F("Analog temperature is %s"),buf);
 	}
 	setCondTemp(ext_temperature); // Causing problems
 	getCond(&sensor_COND);// conductivity.
@@ -395,13 +392,10 @@ void sched3() {
 	Logger_SD::Instance()->msgL(DEBUG,F("---------- Sched3 entered"));
 	log_idx +=sprintf(log_output + log_idx,"%s,",g_time.toYMDString(buf,buf_len));
 	Logger_SD::Instance()->msgL(DEBUG,F("sched3 Logging %s of size %u"),log_output,log_idx);
-	if ( log_idx >= log_line_max ) Logger_SD::Instance()->msgL(ERROR,F("sched2 log line exceeds maximum of %d"),log_line_max);
+	if ( log_idx >= log_line_max ) Logger_SD::Instance()->msgL(ERROR,F("sched3 log line exceeds maximum of %d"),log_line_max);
 	Logger_SD::Instance()->saveSample(log_output,log_idx);
-	//float press_mBar = presstemp.press_mBar;
-	//float density_kgm3 = getDensity(presstemp.temp_C,atof(sensor_COND.sal));
-	//float depth_m = getDepth(presstemp.press_kPa, density_kgm3);
-	//Serial.print("density is "); Serial.println(depth_m);
-	//Serial.print("depth is "); Serial.println(depth_m);
+	//delay(10000); // should trip wathcdog
+	//delay(10000); // should trip wathcdog 
 }
 
 bool checkSolenoid(){

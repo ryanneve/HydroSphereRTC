@@ -200,15 +200,14 @@ bool _getCond(struct CondStruct *aCond){
 	aCond->_tds = SerialCond.parseFloat();
 	aCond->_sal = SerialCond.parseFloat();
 	aCond->_sg = SerialCond.parseFloat();
-	/*
-	Serial.println("Conductivity values: EC, TDS, SAL, SG");
-	Serial.print(aCond->_ec);  Serial.write(',');
-	Serial.print(aCond->_tds); Serial.write(',');
-	Serial.print(aCond->_sal); Serial.write(',');
-	Serial.print(aCond->_sg);  Serial.println();
-	*/
-	Logger_SD::Instance()->msgL(INFO,F("Conductivity values: EC, TDS, SAL, SG %f,%f,%f,%f"),
-		aCond->_ec,aCond->_tds,aCond->_sal,aCond->_sg);
+	// Save as strings
+	dtostrf(aCond->_ec,8,2,aCond->ec);
+	dtostrf(aCond->_tds,8,2,aCond->tds);
+	dtostrf(aCond->_sal,8,2,aCond->sal);
+	dtostrf(aCond->_sg,8,2,aCond->sg);
+	// Log values
+	Logger_SD::Instance()->msgL(INFO,F("Conductivity values: EC, TDS, SAL, SG %s,%s,%s,%s"),
+		aCond->ec,aCond->tds,aCond->sal,aCond->sg);
 }
 void setCondK(char *ec_k) {
 	// Set probe K value. Can be 0.1, 1.0, 10.0
@@ -220,10 +219,9 @@ void setCondK(char *ec_k) {
 void setCondTemp(float temp_C){
 	char buf[50];
 	char charRead;
-	uint8_t sig_fig = 4;
-	dtostrf(temp_C,sig_fig,1,buf);
+	uint8_t sig_fig = 5;
+	dtostrf(temp_C,sig_fig,2,buf);
 	Logger_SD::Instance()->msgL(INFO,F("Setting EC temperature to %s."),buf);
-	// Serial.print("sending: T,"); Serial.write(buf,sig_fig); Serial.println("<CR>");
 	SerialCond.print("T,");
 	SerialCond.print(buf);
 	SerialCond.write(13); // CR
@@ -254,7 +252,7 @@ bool getCond(struct CondStruct *aCond){
 		if ( charRead == 13 ) Serial.print("<CR>");
 		else Serial.write(charRead);
 	}
-	Serial.println(F("]\r\nRequesting Conductivity data");
+	Serial.println(F("]\r\nRequesting Conductivity data"));
 	SerialCond.write('R');
 	SerialCond.write(13);
 	delay(1500);

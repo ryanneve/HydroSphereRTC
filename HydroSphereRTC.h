@@ -26,19 +26,21 @@ const uint8_t CLOCK_SS_PIN = 49;
 /*----------( Structures )----------*/
 
 /*----------( Function Prototypes )----------*/
-void saveLog();
-void sched1();
-void sched2();
-void sched3();
-uint16_t         freeRam();
-void            trigSolenoid(int16_t open_millis);
-void            lowPowerDelay(uint16_t seconds);
-void            deepSleep(uint16_t quarterSeconds);
-void      hs_console();
-char getByte0(bool ignore_EOL);
-void HSconsoleDownloadData();
-void HSconsoleDeleteData();
-void downloadFile();
+void		saveLog();
+void		sched1();
+void		sched2();
+void		sched3();
+uint16_t	freeRam();
+void		trigSolenoid(int16_t open_millis);
+void		lowPowerDelay(uint16_t seconds);
+void		deepSleep(uint16_t quarterSeconds);
+void		hs_console();
+char		getByte0(bool ignore_EOL);
+void		HSconsoleDownloadData();
+void		HSconsoleDeleteData();
+void		HSconsoleUtilities();
+void		downloadSampleFile();
+void		watchdogSetup();
 
 extern Logger_SD logger(uint8_t);
 #endif //HydroSphere_h
